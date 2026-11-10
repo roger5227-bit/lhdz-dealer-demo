@@ -1,0 +1,812 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg'/>">
+<title>龍虎大戰｜荷官影片貼圖示範</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; padding: 0; height: 100%; background: #000;
+    font-family: "PingFang TC", "Noto Sans CJK TC", "Noto Sans TC", "Microsoft JhengHei", system-ui, sans-serif;
+    color: #fff; overflow: hidden; user-select: none;
+  }
+  #stage {
+    position: relative;
+    margin: 0 auto;
+    width: 100vw;
+    height: 100vh;
+  }
+  #gl {
+    position: absolute; left: 0; top: 0; width: 100%; height: 100%;
+    display: block;
+    background: #000;
+  }
+  #hud {
+    position: absolute; left: 50%; top: max(8px, env(safe-area-inset-top));
+    transform: translateX(-50%);
+    z-index: 5;
+    font-size: 11px; line-height: 1.35;
+    letter-spacing: .02em;
+    background: rgba(0,0,0,.55);
+    border: 1px solid rgba(255,220,140,.35);
+    border-radius: 8px;
+    padding: 5px 10px;
+    pointer-events: none;
+    white-space: nowrap;
+    text-shadow: 0 1px 2px #000;
+    max-width: 92%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  #hud b { color: #ffe08a; font-weight: 600; }
+  #hint {
+    position: absolute; left: 50%; bottom: 118px;
+    transform: translateX(-50%);
+    z-index: 5;
+    font-size: 11px;
+    background: rgba(0,0,0,.5);
+    border-radius: 8px;
+    padding: 4px 8px;
+    pointer-events: none;
+    opacity: .85;
+    white-space: nowrap;
+  }
+  #btns {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    z-index: 6;
+    display: flex; gap: 6px;
+    padding: 8px 8px calc(8px + env(safe-area-inset-bottom));
+    background: linear-gradient(to top, rgba(0,0,0,.72), rgba(0,0,0,.28) 70%, transparent);
+    justify-content: space-between;
+  }
+  #btns button {
+    flex: 1;
+    appearance: none; border: 1px solid rgba(130,210,255,.55);
+    background: rgba(12, 28, 52, .82);
+    color: #e8f6ff;
+    border-radius: 8px;
+    padding: 10px 4px;
+    font-size: 13px; font-weight: 600;
+    font-family: inherit;
+    letter-spacing: .04em;
+  }
+  #btns button:active { background: rgba(30, 80, 130, .95); }
+  #btns button.on { border-color: #6cf; box-shadow: 0 0 0 1px #6cf inset; }
+  #gate {
+    position: absolute; inset: 0; z-index: 10;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    background: rgba(0,0,0,.45);
+    text-align: center;
+    padding: 24px;
+  }
+  #gate.hidden { display: none; }
+  #gate .tap {
+    margin-top: 16px;
+    padding: 14px 28px;
+    border-radius: 999px;
+    border: 1px solid #f0d48a;
+    background: rgba(20,12,8,.75);
+    color: #ffe9b0;
+    font-size: 18px; font-weight: 700;
+    letter-spacing: .12em;
+  }
+  #gate p { margin: 0; font-size: 14px; line-height: 1.6; color: #f0f0f0; max-width: 22em; }
+  #err {
+    position: absolute; left: 8px; right: 8px; top: 48px; z-index: 8;
+    color: #ffb0b0; font-size: 12px; display: none;
+    background: rgba(40,0,0,.7); padding: 8px; border-radius: 6px;
+  }
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="gl" width="1080" height="1920"></canvas>
+  <div id="hud">準備中…</div>
+  <div id="hint">背景 → 荷官影片（WebGL 貼圖）→ 注區／座位 UI 蓋在上面</div>
+  <div id="btns">
+    <button type="button" data-act="start">開始下注</button>
+    <button type="button" data-act="stop">停止下注</button>
+    <button type="button" data-act="win">玩家贏</button>
+    <button type="button" data-act="lose">玩家輸</button>
+  </div>
+  <div id="gate">
+    <p>這是把荷官影片當成 WebGL 貼圖播放的示範，不是手機原生影片視窗。<br>注區和座位會蓋住荷官，用來確認圖層順序。</p>
+    <div class="tap">點一下開始</div>
+  </div>
+  <div id="err"></div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var CW = 1080, CH = 1920;
+  var DEALER = { x: 0, y: 0, w: 1080, h: 810 };
+  var UI_BOTTOM_Y = 802;
+  var FADE_SEC = 0.2;
+  var BASE = '';
+
+  var CLIPS = {
+    idle:            'dealer_idle.mp4',
+    idle_breath:     'dealer_idle_breath.mp4',
+    idle_hairtuck:   'dealer_idle_hairtuck.mp4',
+    idle_wink:       'dealer_idle_wink.mp4',
+    idle_dance:      'dealer_idle_dance.mp4',
+    idle_stretch:    'dealer_idle_stretch.mp4',
+    idle_bow:        'dealer_idle_bow.mp4',
+    idle_yawn:       'dealer_idle_yawn.mp4',
+    idle_corset:     'dealer_idle_corset.mp4',
+    bet_start:       'dealer_bet_start.mp4',
+    bet_watching:    'dealer_bet_watching.mp4',
+    bet_cheer:       'dealer_bet_cheer.mp4',
+    bet_waiting:     'dealer_bet_waiting.mp4',
+    bet_dance:       'dealer_bet_dance.mp4',
+    bet_stop:        'dealer_bet_stop.mp4',
+    player_win:      'dealer_player_win.mp4',
+    player_win_b:    'dealer_player_win_b.mp4',
+    player_win_c:    'dealer_player_win_c.mp4',
+    player_lose:     'dealer_player_lose.mp4'
+  };
+
+  var PRI = {
+    idle_loop: 0,
+    idle_rand: 1,
+    bet_rand:  2,
+    settle:    3,
+    bet_start: 4,
+    bet_stop:  5
+  };
+
+  var IDLE_LOOP = ['idle', 'idle_breath'];
+  var IDLE_RAND = [
+    ['idle_hairtuck', 20], ['idle_wink', 20], ['idle_bow', 15],
+    ['idle_yawn', 10], ['idle_stretch', 10], ['idle_dance', 15], ['idle_corset', 10]
+  ];
+  var BET_RAND = [
+    ['bet_watching', 30], ['bet_cheer', 25], ['bet_waiting', 25], ['bet_dance', 20]
+  ];
+  var WIN_CLIPS = [
+    ['player_win', 40], ['player_win_b', 30], ['player_win_c', 30]
+  ];
+
+  var NAMES = {
+    idle: '待機', idle_breath: '待機呼吸', idle_hairtuck: '撥髮', idle_wink: '眨眼',
+    idle_dance: '待機跳舞', idle_stretch: '伸懶腰', idle_bow: '整理領結',
+    idle_yawn: '呵欠', idle_corset: '拉馬甲',
+    bet_start: '開始下注', bet_watching: '看注區', bet_cheer: '加油',
+    bet_waiting: '托腮等待', bet_dance: '下注跳舞', bet_stop: '停止下注',
+    player_win: '玩家贏（拍手）', player_win_b: '玩家贏（比 V）',
+    player_win_c: '玩家贏（飛吻）', player_lose: '玩家輸'
+  };
+
+  function pickWeighted(list, exclude, banned) {
+    var items = list.filter(function (it) {
+      if (exclude && it[0] === exclude) return false;
+      if (banned && banned[it[0]] && banned[it[0]] > now()) return false;
+      return true;
+    });
+    if (!items.length) items = list.slice();
+    var sum = 0;
+    for (var i = 0; i < items.length; i++) sum += items[i][1];
+    var r = Math.random() * sum;
+    for (var j = 0; j < items.length; j++) {
+      r -= items[j][1];
+      if (r <= 0) return items[j][0];
+    }
+    return items[0][0];
+  }
+
+  function now() { return performance.now(); }
+
+  /* ---------- layout the stage to contain-fit 1080x1920 ---------- */
+  var stage = document.getElementById('stage');
+  var canvas = document.getElementById('gl');
+  function layout() {
+    var vw = window.innerWidth, vh = window.innerHeight;
+    var s = Math.min(vw / CW, vh / CH);
+    var w = Math.round(CW * s), h = Math.round(CH * s);
+    stage.style.width = w + 'px';
+    stage.style.height = h + 'px';
+    stage.style.marginTop = Math.floor((vh - h) / 2) + 'px';
+    stage.style.marginBottom = '0';
+  }
+  layout();
+  window.addEventListener('resize', layout);
+  window.addEventListener('orientationchange', function () { setTimeout(layout, 200); });
+
+  /* ---------- WebGL ---------- */
+  var gl = canvas.getContext('webgl', {
+    alpha: false,
+    antialias: false,
+    premultipliedAlpha: false,
+    preserveDrawingBuffer: true
+  }) || canvas.getContext('experimental-webgl');
+  if (!gl) {
+    document.getElementById('err').style.display = 'block';
+    document.getElementById('err').textContent = '這個瀏覽器不支援 WebGL，沒辦法示範貼圖播放。';
+    return;
+  }
+
+  function compile(type, src) {
+    var sh = gl.createShader(type);
+    gl.shaderSource(sh, src);
+    gl.compileShader(sh);
+    if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
+      throw new Error(gl.getShaderInfoLog(sh));
+    }
+    return sh;
+  }
+  function program(vs, fs) {
+    var p = gl.createProgram();
+    gl.attachShader(p, compile(gl.VERTEX_SHADER, vs));
+    gl.attachShader(p, compile(gl.FRAGMENT_SHADER, fs));
+    gl.linkProgram(p);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
+      throw new Error(gl.getProgramInfoLog(p));
+    }
+    return p;
+  }
+
+  var VS = [
+    'attribute vec2 a_pos;',
+    'uniform vec4 u_rect;',
+    'uniform vec2 u_res;',
+    'varying vec2 v_uv;',
+    'void main(){',
+    '  vec2 px = u_rect.xy + a_pos * u_rect.zw;',
+    '  vec2 clip = vec2(px.x / u_res.x * 2.0 - 1.0, 1.0 - px.y / u_res.y * 2.0);',
+    '  gl_Position = vec4(clip, 0.0, 1.0);',
+    '  v_uv = a_pos;',
+    '}'
+  ].join('\n');
+
+  var FS = [
+    'precision mediump float;',
+    'varying vec2 v_uv;',
+    'uniform sampler2D u_tex;',
+    'uniform float u_alpha;',
+    'void main(){',
+    '  vec4 c = texture2D(u_tex, v_uv);',
+    '  gl_FragColor = vec4(c.rgb, c.a * u_alpha);',
+    '}'
+  ].join('\n');
+
+  var FS_MIX = [
+    'precision mediump float;',
+    'varying vec2 v_uv;',
+    'uniform sampler2D u_texA;',
+    'uniform sampler2D u_texB;',
+    'uniform float u_fade;',
+    'void main(){',
+    '  vec3 a = texture2D(u_texA, v_uv).rgb;',
+    '  vec3 b = texture2D(u_texB, v_uv).rgb;',
+    '  gl_FragColor = vec4(mix(a, b, u_fade), 1.0);',
+    '}'
+  ].join('\n');
+
+  var prog = program(VS, FS);
+  var progMix = program(VS, FS_MIX);
+  var buf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0,0, 1,0, 0,1, 1,1]), gl.STATIC_DRAW);
+
+  function loc(p, name) { return gl.getUniformLocation(p, name); }
+
+  function makeTex() {
+    var t = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    return t;
+  }
+
+  function upload(tex, source) {
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    try {
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source);
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function drawTex(tex, x, y, w, h, alpha) {
+    gl.useProgram(prog);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.uniform1i(loc(prog, 'u_tex'), 0);
+    gl.uniform4f(loc(prog, 'u_rect'), x, y, w, h);
+    gl.uniform2f(loc(prog, 'u_res'), CW, CH);
+    gl.uniform1f(loc(prog, 'u_alpha'), alpha);
+    var a = gl.getAttribLocation(prog, 'a_pos');
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.enableVertexAttribArray(a);
+    gl.vertexAttribPointer(a, 2, gl.FLOAT, false, 0, 0);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  }
+
+  function drawMix(texA, texB, fade, x, y, w, h) {
+    gl.useProgram(progMix);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, texA);
+    gl.uniform1i(loc(progMix, 'u_texA'), 0);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, texB);
+    gl.uniform1i(loc(progMix, 'u_texB'), 1);
+    gl.uniform4f(loc(progMix, 'u_rect'), x, y, w, h);
+    gl.uniform2f(loc(progMix, 'u_res'), CW, CH);
+    gl.uniform1f(loc(progMix, 'u_fade'), fade);
+    var a = gl.getAttribLocation(progMix, 'a_pos');
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.enableVertexAttribArray(a);
+    gl.vertexAttribPointer(a, 2, gl.FLOAT, false, 0, 0);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  }
+
+  var texPoster = makeTex();
+  var texTop = makeTex();
+  var texBottom = makeTex();
+  var texVid = [makeTex(), makeTex()];
+  var hasPoster = false, hasTop = false, hasBottom = false;
+  var vidReady = [false, false];
+
+  function loadImage(src) {
+    return new Promise(function (resolve, reject) {
+      var img = new Image();
+      img.onload = function () { resolve(img); };
+      img.onerror = function () { reject(new Error('load ' + src)); };
+      img.src = src;
+    });
+  }
+
+  /* ---------- hidden video elements (texture sources, not overlays) ---------- */
+  function makeVideo() {
+    var v = document.createElement('video');
+    v.muted = true;
+    v.defaultMuted = true;
+    v.autoplay = false;
+    v.playsInline = true;
+    v.preload = 'auto';
+    v.loop = false;
+    v.controls = false;
+    v.disablePictureInPicture = true;
+    v.crossOrigin = 'anonymous';
+    v.setAttribute('muted', '');
+    v.setAttribute('playsinline', '');
+    v.setAttribute('webkit-playsinline', '');
+    v.setAttribute('x5-playsinline', '');
+    v.setAttribute('disablepictureinpicture', '');
+    v.style.cssText = 'position:fixed;left:0;top:0;width:2px;height:2px;opacity:0.01;pointer-events:none;z-index:-1;';
+    document.body.appendChild(v);
+    return v;
+  }
+  var videos = [makeVideo(), makeVideo()];
+
+  /* ---------- clip player with optional 0.2s crossfade ---------- */
+  var player = {
+    active: 0,
+    fading: false,
+    fadeFrom: 0,
+    fadeTo: 0,
+    fadeT0: 0,
+    fadeDur: FADE_SEC * 1000,
+    currentId: null,
+    currentPri: -1,
+    onEnded: null,
+    endedFired: false,
+    started: false,
+    seq: 0
+  };
+
+  function srcOf(id) { return BASE + CLIPS[id]; }
+
+  function other(i) { return 1 - i; }
+
+  function bindEnded(el, slot) {
+    el.addEventListener('ended', function () {
+      if (slot !== player.active || player.fading) return;
+      if (player.endedFired) return;
+      player.endedFired = true;
+      var fn = player.onEnded;
+      var id = player.currentId;
+      var seq = player.seq;
+      if (fn && seq === player.seq) fn(id);
+    });
+  }
+  bindEnded(videos[0], 0);
+  bindEnded(videos[1], 1);
+
+  function preload(id) {
+    if (!id || !CLIPS[id]) return;
+    var slot = other(player.active);
+    var v = videos[slot];
+    var url = srcOf(id);
+    if (v.getAttribute('data-id') === id && v.readyState >= 2) return;
+    v.setAttribute('data-id', id);
+    v.src = url;
+    v.load();
+  }
+
+  function playClip(id, opts) {
+    opts = opts || {};
+    var fade = opts.fade ? FADE_SEC : 0;
+    var pri = opts.pri == null ? 0 : opts.pri;
+    // Always ping-pong to the other element after the first clip,
+    // so a just-ended video cannot fire a stale "ended" on the new play.
+    var to = player.started ? other(player.active) : 0;
+
+    var v = videos[to];
+    var url = srcOf(id);
+    if (v.getAttribute('data-id') !== id) {
+      v.setAttribute('data-id', id);
+      v.src = url;
+      v.load();
+    }
+
+    function go() {
+      try { v.currentTime = 0; } catch (e) {}
+      var p = v.play();
+      if (p && p.catch) p.catch(function () { /* autoplay blocked */ });
+      player.seq += 1;
+      player.endedFired = false;
+      player.currentId = id;
+      player.currentPri = pri;
+      player.onEnded = opts.onEnded || null;
+      if (fade > 0 && player.started && to !== player.active && vidReady[player.active]) {
+        player.fading = true;
+        player.fadeFrom = player.active;
+        player.fadeTo = to;
+        player.fadeT0 = now();
+        player.fadeDur = fade * 1000;
+        player.active = to;
+      } else {
+        if (to !== player.active) {
+          try { videos[player.active].pause(); } catch (e2) {}
+        }
+        player.fading = false;
+        player.active = to;
+      }
+      player.started = true;
+    }
+
+    if (v.readyState >= 2) {
+      go();
+    } else {
+      var done = false;
+      var kick = function () {
+        if (done) return;
+        done = true;
+        v.removeEventListener('canplay', kick);
+        v.removeEventListener('loadeddata', kick);
+        go();
+      };
+      v.addEventListener('canplay', kick);
+      v.addEventListener('loadeddata', kick);
+      setTimeout(kick, 800);
+    }
+  }
+
+  /* ---------- director (串接規則) ---------- */
+  var director = {
+    mode: 'idle',          // idle | betting | settle
+    loopId: 'idle',
+    loopLeft: 1,
+    lastIdleRand: null,
+    lastBetRand: null,
+    lastWin: null,
+    idleBan: {},
+    nextIdleRandAt: 0,
+    bettingEndsAt: 0,
+    nextBetRandAt: 0,
+    pending: null
+  };
+
+  function scheduleIdleRand() {
+    director.nextIdleRandAt = now() + 12000 + Math.random() * 6000;
+  }
+
+  function playIdleLoop(fade) {
+    director.mode = 'idle';
+    var id = director.loopId;
+    playClip(id, {
+      pri: PRI.idle_loop,
+      fade: !!fade,
+      onEnded: onClipEnded
+    });
+    var nxt = id === 'idle' ? 'idle_breath' : 'idle';
+    if (director.loopLeft <= 1) preload(nxt);
+    else preload(id);
+  }
+
+  function startIdle() {
+    director.mode = 'idle';
+    director.loopId = Math.random() < 0.5 ? 'idle' : 'idle_breath';
+    director.loopLeft = 1 + Math.floor(Math.random() * 2);
+    scheduleIdleRand();
+    playIdleLoop(false);
+  }
+
+  function onClipEnded(id) {
+    if (director.pending) {
+      var job = director.pending;
+      director.pending = null;
+      job();
+      return;
+    }
+    if (director.mode === 'betting') {
+      // After a bet-random or after bet_start, return to idle loop until next trigger / stop
+      if (id === 'bet_start') {
+        director.nextBetRandAt = now() + 3000 + Math.random() * 2000;
+      }
+      playIdleLoop(false);
+      return;
+    }
+    if (director.mode === 'settle') {
+      startIdle();
+      return;
+    }
+    // idle
+    if (IDLE_LOOP.indexOf(id) >= 0) {
+      director.loopLeft -= 1;
+      if (director.loopLeft <= 0) {
+        director.loopId = id === 'idle' ? 'idle_breath' : 'idle';
+        director.loopLeft = 1 + Math.floor(Math.random() * 2);
+      }
+      // maybe insert idle random if due
+      if (now() >= director.nextIdleRandAt) {
+        playIdleRandom();
+        return;
+      }
+      playIdleLoop(false);
+      return;
+    }
+    // finished an idle random
+    scheduleIdleRand();
+    playIdleLoop(false);
+  }
+
+  function playIdleRandom() {
+    var id = pickWeighted(IDLE_RAND, director.lastIdleRand, director.idleBan);
+    director.lastIdleRand = id;
+    director.idleBan[id] = now() + 20000;
+    director.mode = 'idle';
+    playClip(id, { pri: PRI.idle_rand, fade: false, onEnded: onClipEnded });
+  }
+
+  function playBetRandom() {
+    var remain = director.bettingEndsAt - now();
+    if (remain < 2000) return false;
+    var id = pickWeighted(BET_RAND, director.lastBetRand, null);
+    director.lastBetRand = id;
+    playClip(id, { pri: PRI.bet_rand, fade: false, onEnded: onClipEnded });
+    director.nextBetRandAt = now() + 3000 + Math.random() * 2000;
+    return true;
+  }
+
+  function requestEvent(kind) {
+    var pri = PRI[kind === 'win' || kind === 'lose' ? 'settle' : kind];
+    if (pri == null) pri = 0;
+    var cur = player.currentPri;
+    var run = function () { executeEvent(kind); };
+    if (player.started && pri <= cur && !videos[player.active].ended) {
+      // same or lower priority: wait until current clip ends (except idle loop, which can be interrupted by anything above)
+      if (pri > PRI.idle_loop) {
+        director.pending = run;
+        return;
+      }
+    }
+    run();
+  }
+
+  function executeEvent(kind) {
+    if (kind === 'bet_start') {
+      director.mode = 'betting';
+      director.pending = null;
+      director.bettingEndsAt = now() + 12000;
+      director.nextBetRandAt = Infinity; // after start clip
+      playClip('bet_start', { pri: PRI.bet_start, fade: true, onEnded: onClipEnded });
+      return;
+    }
+    if (kind === 'bet_stop') {
+      director.mode = 'idle'; // after stop ends → idle
+      director.pending = null;
+      director.bettingEndsAt = 0;
+      playClip('bet_stop', { pri: PRI.bet_stop, fade: true, onEnded: function () { startIdle(); } });
+      return;
+    }
+    if (kind === 'win') {
+      var id = pickWeighted(WIN_CLIPS, director.lastWin, null);
+      director.lastWin = id;
+      director.mode = 'settle';
+      director.bettingEndsAt = 0;
+      playClip(id, { pri: PRI.settle, fade: true, onEnded: onClipEnded });
+      return;
+    }
+    if (kind === 'lose') {
+      director.mode = 'settle';
+      director.bettingEndsAt = 0;
+      playClip('player_lose', { pri: PRI.settle, fade: true, onEnded: onClipEnded });
+    }
+  }
+
+  /* ---------- tick: fade, auto stop, bet/idle random, texture upload, draw ---------- */
+  var fps = 0, frames = 0, fpsT = now();
+  var running = false;
+  var hudEl = document.getElementById('hud');
+  var btnEls = document.querySelectorAll('#btns button');
+
+  function tick() {
+    requestAnimationFrame(tick);
+    var t = now();
+    frames++;
+    if (t - fpsT >= 500) {
+      fps = Math.round(frames * 1000 / (t - fpsT));
+      frames = 0;
+      fpsT = t;
+    }
+
+    // auto stop after 12s betting window
+    if (director.mode === 'betting' && director.bettingEndsAt && t >= director.bettingEndsAt) {
+      if (player.currentId !== 'bet_stop') requestEvent('bet_stop');
+    } else if (director.mode === 'betting' && player.currentPri <= PRI.idle_loop && t >= director.nextBetRandAt) {
+      playBetRandom();
+    } else if (director.mode === 'idle' && player.currentPri === PRI.idle_loop && t >= director.nextIdleRandAt) {
+      // interrupt idle loop with idle random? Rules say idle random is inserted, can wait for loop end too.
+      // We also trigger on ended; here we allow mid-loop insert after the due time only at natural end,
+      // already handled. No mid-loop interrupt for same-flow randoms.
+    }
+
+    // update fade
+    var fadeAmt = 1;
+    if (player.fading) {
+      fadeAmt = Math.min(1, (t - player.fadeT0) / player.fadeDur);
+      if (fadeAmt >= 1) {
+        player.fading = false;
+        try { videos[player.fadeFrom].pause(); } catch (e) {}
+        vidReady[player.fadeFrom] = false;
+      }
+    }
+
+    // upload video frames
+    for (var i = 0; i < 2; i++) {
+      var v = videos[i];
+      if (v.readyState >= 2 && !v.paused && !v.ended) {
+        if (upload(texVid[i], v)) vidReady[i] = true;
+      }
+    }
+
+    // early-end handoff for tighter loops
+    var av = videos[player.active];
+    if (player.started && !player.fading && !player.endedFired && av.duration && isFinite(av.duration)) {
+      if (av.currentTime >= av.duration - 0.04) {
+        player.endedFired = true;
+        var fn = player.onEnded;
+        var id = player.currentId;
+        if (fn) fn(id);
+      }
+    }
+
+    // draw
+    gl.viewport(0, 0, CW, CH);
+    gl.clearColor(0.05, 0.02, 0.08, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.disable(gl.BLEND);
+
+    if (player.fading && vidReady[player.fadeFrom] && vidReady[player.fadeTo]) {
+      drawMix(texVid[player.fadeFrom], texVid[player.fadeTo], fadeAmt,
+              DEALER.x, DEALER.y, DEALER.w, DEALER.h);
+    } else if (player.started && vidReady[player.active]) {
+      drawTex(texVid[player.active], DEALER.x, DEALER.y, DEALER.w, DEALER.h, 1);
+    } else if (hasPoster) {
+      drawTex(texPoster, DEALER.x, DEALER.y, DEALER.w, DEALER.h, 1);
+    }
+
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    if (hasTop) drawTex(texTop, 0, 0, CW, UI_BOTTOM_Y, 1);
+    if (hasBottom) drawTex(texBottom, 0, UI_BOTTOM_Y, CW, CH - UI_BOTTOM_Y, 1);
+
+    var clipName = player.currentId ? (NAMES[player.currentId] || player.currentId) : '尚未開始';
+    var modeName = { idle: '待機', betting: '下注中', settle: '結算' }[director.mode] || director.mode;
+    var remain = '';
+    if (director.mode === 'betting' && director.bettingEndsAt) {
+      var sec = Math.max(0, Math.ceil((director.bettingEndsAt - t) / 1000));
+      remain = '  倒數 ' + sec + 's';
+    }
+    hudEl.innerHTML = 'WebGL 貼圖　<b>' + fps + '</b> fps　' + modeName + '／' + clipName + remain;
+
+    window.__demo = {
+      fps: fps,
+      clip: player.currentId,
+      mode: director.mode,
+      started: player.started,
+      vidReady: vidReady[player.active],
+      hasTop: hasTop,
+      hasBottom: hasBottom
+    };
+
+    // button highlight
+    for (var b = 0; b < btnEls.length; b++) {
+      var act = btnEls[b].getAttribute('data-act');
+      var on = (act === 'start' && director.mode === 'betting') ||
+               (act === 'stop' && player.currentId === 'bet_stop');
+      btnEls[b].classList.toggle('on', on);
+    }
+  }
+
+  /* ---------- boot ---------- */
+  var gate = document.getElementById('gate');
+  var startedUI = false;
+
+  function startPlayback() {
+    if (startedUI) return;
+    startedUI = true;
+    gate.classList.add('hidden');
+    var hint = document.getElementById('hint');
+    if (hint) hint.style.display = 'none';
+    startIdle();
+  }
+
+  function tryAutoplayThenStart() {
+    // Attempt muted autoplay; if rejected, keep the gate.
+    videos[0].setAttribute('data-id', 'idle');
+    videos[0].src = srcOf('idle');
+    videos[0].load();
+    var p = videos[0].play();
+    if (p && p.then) {
+      p.then(function () {
+        videos[0].pause();
+        try { videos[0].currentTime = 0; } catch (e) {}
+        startPlayback();
+      }).catch(function () {
+        // wait for tap
+      });
+    }
+  }
+
+  document.getElementById('btns').addEventListener('click', function (ev) {
+    var btn = ev.target.closest('button');
+    if (!btn) return;
+    if (!startedUI) startPlayback();
+    var act = btn.getAttribute('data-act');
+    if (act === 'start') requestEvent('bet_start');
+    else if (act === 'stop') requestEvent('bet_stop');
+    else if (act === 'win') requestEvent('win');
+    else if (act === 'lose') requestEvent('lose');
+  });
+
+  gate.addEventListener('click', startPlayback);
+  canvas.addEventListener('click', function () {
+    if (!startedUI) startPlayback();
+  });
+
+  Promise.all([
+    loadImage('poster.jpg'),
+    loadImage('ui_top.webp'),
+    loadImage('ui_bottom.jpg')
+  ]).then(function (imgs) {
+    hasPoster = upload(texPoster, imgs[0]);
+    hasTop = upload(texTop, imgs[1]);
+    hasBottom = upload(texBottom, imgs[2]);
+    running = true;
+    requestAnimationFrame(tick);
+    tryAutoplayThenStart();
+  }).catch(function (err) {
+    document.getElementById('err').style.display = 'block';
+    document.getElementById('err').textContent = '圖片載入失敗：' + err.message;
+    running = true;
+    requestAnimationFrame(tick);
+  });
+})();
+</script>
+</body>
+</html>
